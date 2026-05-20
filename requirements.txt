@@ -1,0 +1,4 @@
+tweepy
+anthropic
+requests
+python-dotenv
