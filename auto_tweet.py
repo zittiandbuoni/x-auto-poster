@@ -74,7 +74,31 @@ def load_recent_tweets(n=10):
 def fetch_trends():
     if not SERP_API_KEY:
         return []
-    queries = ['AIツール 活用 最新', '副業 IT', 'Python 自動化 2026']
+
+    # ブログカテゴリ全体をカバーするクエリ群
+    # 毎回全部叩かずランダムに4つ選んでAPIコストを抑える
+    import random
+    all_queries = [
+        # AIツール活用
+        'AIツール 仕事 活用 最新',
+        '生成AI 業務効率化',
+        # 副業・収益化
+        '副業 IT エンジニア',
+        'ブログ アフィリエイト 収益',
+        # Python・開発・自動化
+        'Python 自動化 業務',
+        'プログラミング 個人開発 副業',
+        # ITキャリア・転職
+        'ITエンジニア 転職 2026',
+        'ITコンサル キャリア',
+        # 資産形成・投資
+        '投資 副業 資産形成',
+        'FIRE サイドFIRE 最新',
+        # プログラミング学習
+        'プログラミング 独学 学習法',
+    ]
+    queries = random.sample(all_queries, 4)
+
     trends = []
     for q in queries:
         try:
@@ -88,7 +112,7 @@ def fetch_trends():
                     trends.append(title)
         except Exception:
             pass
-    return trends[:6]
+    return trends[:8]
 
 # ============================================================
 # Claude で共感ツイートを生成
