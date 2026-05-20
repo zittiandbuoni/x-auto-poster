@@ -92,40 +92,59 @@ def parse_log(log_text):
 # ============================================================
 # ツイート生成
 # ============================================================
-def generate_tweet(d, wp_total):
+def clean_metrics(metrics_text, wp_total):
+    """記事数行をWP自動取得値に置き換える"""
+    lines = [l for l in metrics_text.splitlines() if not l.strip().startswith('- 記事数')]
+    if wp_total:
+        lines.insert(0, f'- 記事数：{wp_total}本')
+    return '\n'.join(lines)
+
+def clean_revenue(revenue_text):
+    """目標不足行を除去（ツイート内で重複しないよう）"""
+    lines = [l for l in revenue_text.splitlines() if '目標まで' not in l]
+    return '\n'.join(lines)
+
+def generate_thread(d, wp_total):
+    """スレッド形式で3ツイートを生成"""
+    metrics = clean_metrics(d['metrics_text'], wp_total)
+
+    pv_line  = next((l.lstrip('- ') for l in metrics.splitlines() if '月間PV'    in l), '')
+    imp_line = next((l.lstrip('- ') for l in metrics.splitlines() if '表示回数'  in l), '')
+    clk_line = next((l.lstrip('- ') for l in metrics.splitlines() if 'クリック数' in l), '')
+    art_line = next((l.lstrip('- ') for l in metrics.splitlines() if '記事数'    in l), '')
+
     done_lines = [l.lstrip('- ').strip() for l in d['done_text'].splitlines() if l.strip().startswith('-')]
-    done_top3  = '\n'.join(f'・{l}' for l in done_lines[:3])
+    done_items = '\n'.join(f'・{l}' for l in done_lines[:5])
 
     next_lines = [l.lstrip('- ').strip() for l in d['next_text'].splitlines() if l.strip().startswith('-')]
-    next_top2  = '\n'.join(f'・{l}' for l in next_lines[:2])
+    next_items = '\n'.join(f'・{l}' for l in next_lines[:3])
 
-    wp_line = f'・記事数：{wp_total}本' if wp_total else ''
+    tweet1 = f"""副業収入レポート {d['month']}
 
-    tweet = f"""【副業収入レポート {d['month']}】
+収益：{d['total']}円
+{art_line}
+{pv_line}
+{imp_line}
+{clk_line}
 
-{d['revenue_text']}
-━━━━━━━━
-目標の月5万まで：{d['gap']}円不足
+目標の月5万まで：{d['gap']}円不足"""
 
-{d['metrics_text']}
-{wp_line}
+    tweet2 = f"""今月やったこと：
+{done_items}"""
 
-今月やったこと：
-{done_top3}
-
-来月の作戦：
-{next_top2}
+    tweet3 = f"""来月の作戦：
+{next_items}
 
 詳細はブログに書きました👇
 {WP_URL}"""
 
-    return tweet.strip()
+    return [tweet1.strip(), tweet2.strip(), tweet3.strip()]
 
 # ============================================================
 # ブログ記事（まとめ）生成
 # ============================================================
 def generate_blog(d, wp_total):
-    wp_line = f'- 記事数：{wp_total}本' if wp_total else ''
+    metrics = clean_metrics(d['metrics_text'], wp_total)
     blog = f"""# {d['month']} 副業収入レポート｜Code to Rich
 
 ## 今月の収益
@@ -134,8 +153,7 @@ def generate_blog(d, wp_total):
 
 ## サイト指標
 
-{d['metrics_text']}
-{wp_line}
+{metrics}
 
 ## 今月やったこと
 
@@ -181,14 +199,15 @@ def main():
     d = parse_log(log_text)
     print(f'  → 対象月: {d["month"]}')
 
-    tweet = generate_tweet(d, wp_total)
-    blog  = generate_blog(d, wp_total)
+    thread = generate_thread(d, wp_total)
+    blog   = generate_blog(d, wp_total)
 
     print('\n' + '=' * 60)
-    print('【X投稿用ツイート】')
+    print('【Xスレッド（3ツイート）】')
     print('=' * 60)
-    print(tweet)
-    print(f'\n文字数: {len(tweet)}文字')
+    for i, t in enumerate(thread, 1):
+        print(f'\n--- ツイート{i} ({len(t)}文字) ---')
+        print(t)
 
     print('\n' + '=' * 60)
     print('【ブログ記事用（マークダウン）】')
@@ -203,7 +222,7 @@ def main():
     blog_path  = f'{out_dir}/{month_slug}-blog.md'
 
     with open(tweet_path, 'w', encoding='utf-8') as f:
-        f.write(tweet)
+        f.write('\n\n---\n\n'.join(thread))
     with open(blog_path, 'w', encoding='utf-8') as f:
         f.write(blog)
 
