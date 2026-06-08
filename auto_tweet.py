@@ -4,14 +4,16 @@ Code to Rich - X自動投稿スクリプト
 
 使い方:
   python3 auto_tweet.py --type engagement   # URLなし共感ツイートを生成して投稿
+  python3 auto_tweet.py --type follower     # フォロワー獲得用ツイート（共感＋相互フォロー系ハッシュタグ）を生成して投稿
   python3 auto_tweet.py --type article      # キューから記事ツイートを投稿
   python3 auto_tweet.py --type cost         # 今月のAPIコスト確認
   python3 auto_tweet.py --type preview      # 投稿せず内容だけ確認
 
 cron設定例:
-  0  8 * * * venv/bin/python3 auto_tweet.py --type engagement
+  0  8 * * * venv/bin/python3 auto_tweet.py --type follower
   0 12 * * 1,3,5 venv/bin/python3 auto_tweet.py --type article
-  0 20 * * * venv/bin/python3 auto_tweet.py --type engagement
+  0 14 * * * venv/bin/python3 auto_tweet.py --type follower
+  0 20 * * * venv/bin/python3 auto_tweet.py --type follower
 """
 
 import tweepy
@@ -158,6 +160,72 @@ def generate_engagement_tweet():
     return msg.content[0].text.strip()
 
 # ============================================================
+# フォロワー獲得用ハッシュタグセット（ローテーションで量産感を抑える）
+# ============================================================
+HASHTAG_SETS = [
+    ['#ブルバ100', '#相互フォロー'],
+    ['#フォロバ100', '#ITエンジニアと繋がりたい'],
+    ['#駆け出しエンジニアと繋がりたい', '#プログラミング初心者'],
+    ['#相互フォロー支援', '#朝活'],
+    ['#エンジニアと繋がりたい', '#Python学習中'],
+    ['#いいねした人全員フォローする', '#ブルバ100'],
+]
+
+def pick_hashtag_set(recent_texts):
+    import random
+    recent_block = ' '.join(recent_texts[-2:])
+    candidates = [s for s in HASHTAG_SETS if not any(tag in recent_block for tag in s)]
+    return random.choice(candidates or HASHTAG_SETS)
+
+# ============================================================
+# Claude でフォロワー獲得用ツイートを生成（共感ツイート＋相互フォロー系ハッシュタグ）
+# ============================================================
+def generate_follower_tweet():
+    persona      = load_persona()
+    recent       = load_recent_tweets()
+    trends       = fetch_trends()
+    weekday      = ['月', '火', '水', '木', '金', '土', '日'][datetime.now().weekday()]
+    hashtags     = pick_hashtag_set(recent)
+    hashtag_line = ' '.join(hashtags)
+
+    recent_block = '\n'.join(f'- {t}' for t in recent) if recent else '（まだ投稿なし）'
+    trend_block  = '\n'.join(f'- {t}' for t in trends)  if trends else '（取得なし）'
+
+    prompt = f"""以下のペルソナ定義に従って、ペスカとしてXに投稿するツイートの本文を1つ書いてください。
+末尾には後でハッシュタグを別途付け足すので、本文だけを書いてください。
+
+=== ペルソナ定義 ===
+{persona}
+
+=== 直近の投稿（同じ書き出し・テーマを繰り返さないための参考） ===
+{recent_block}
+
+=== 今日のトレンド（ペスカ視点で触れられそうなら使う） ===
+{trend_block}
+
+=== 生成ルール ===
+- 今日は{weekday}曜日
+- URLなし、本文は90文字以内（後ろにハッシュタグが付くため余白を残す）
+- 必ず「いきなり本題から」始める。時間・曜日・場所から入らない
+- 構成：具体的な出来事 → 人間らしい反応 → オチ・欲望・疑問
+- 語尾は「〜らしい」「〜気がする」「〜なのかな」「〜してみた」など自然なものを状況に合わせて選ぶ（毎回同じにしない）
+- `（毎回思ってる）`「〜なんだけどな」などの自己ツッコミを自然に入れる
+- 絵文字は3〜4投稿に1回程度。毎回つけない。🫠ばかり使わず状況に合わせて選ぶ
+- 抽象的なまとめ・教訓で終わらない
+- ペルソナ定義のNGパターンを絶対に使わない
+- ハッシュタグは付けない（後で自動付与される）
+- ツイート本文のみ出力（説明・前置き一切不要）"""
+
+    client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
+    msg = client.messages.create(
+        model='claude-opus-4-5',
+        max_tokens=300,
+        messages=[{'role': 'user', 'content': prompt}]
+    )
+    body = msg.content[0].text.strip()
+    return f'{body}\n\n{hashtag_line}'
+
+# ============================================================
 # ツイート投稿
 # ============================================================
 def post_tweet(text, has_url=False, dry_run=False):
@@ -250,12 +318,18 @@ def show_cost():
 # ============================================================
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--type', choices=['engagement', 'article', 'cost', 'preview'], default='preview')
+    parser.add_argument('--type', choices=['engagement', 'follower', 'article', 'cost', 'preview'], default='preview')
     args = parser.parse_args()
 
     if args.type == 'engagement':
         print('🤖 共感ツイートを生成中...')
         text = generate_engagement_tweet()
+        print(f'生成:\n{text}\n')
+        post_tweet(text, has_url=False)
+
+    elif args.type == 'follower':
+        print('🤖 フォロワー獲得ツイートを生成中...')
+        text = generate_follower_tweet()
         print(f'生成:\n{text}\n')
         post_tweet(text, has_url=False)
 
