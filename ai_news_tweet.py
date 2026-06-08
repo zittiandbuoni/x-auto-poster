@@ -117,8 +117,10 @@ def fetch_rss(feed: dict) -> list:
         for b in blocks[:5]:  # 最新5件
             title = re.search(r'<title[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>', b, re.DOTALL)
             link  = re.search(r'<(?:link|id)>([^<]+)</(?:link|id)>|<link[^>]+href=["\']([^"\']+)["\']', b)
+            desc  = re.search(r'<(?:description|summary)[^>]*>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</(?:description|summary)>', b, re.DOTALL)
             title = title.group(1).strip() if title else ''
             url   = (link.group(1) or link.group(2)).strip() if link else ''
+            description = re.sub(r'<[^>]+>', '', desc.group(1)).strip() if desc else ''
 
             if not title or not url:
                 continue
@@ -128,7 +130,7 @@ def fetch_rss(feed: dict) -> list:
                 if not any(k in title.lower() or k in url.lower() for k in feed['keywords']):
                     continue
 
-            items.append({'title': title, 'url': url, 'source': feed['name']})
+            items.append({'title': title, 'url': url, 'source': feed['name'], 'description': description[:300]})
 
         return items
 
@@ -154,10 +156,13 @@ def fetch_anthropic() -> list:
             try:
                 page = requests.get(url, headers=HEADERS, timeout=8).content.decode('utf-8', errors='ignore')
                 title_m = re.search(r'<title[^>]*>([^<]+)</title>', page)
+                desc_m  = (re.search(r'<meta\s+name="description"\s+content="([^"]*)"', page)
+                           or re.search(r'<meta\s+property="og:description"\s+content="([^"]*)"', page))
                 title = title_m.group(1).replace(' \\ Anthropic', '').strip() if title_m else path.split('/')[-1]
-                items.append({'title': title, 'url': url, 'source': 'Anthropic'})
+                description = desc_m.group(1).strip() if desc_m else ''
+                items.append({'title': title, 'url': url, 'source': 'Anthropic', 'description': description[:300]})
             except Exception:
-                items.append({'title': path.split('/')[-1], 'url': url, 'source': 'Anthropic'})
+                items.append({'title': path.split('/')[-1], 'url': url, 'source': 'Anthropic', 'description': ''})
 
         return items
 
@@ -175,8 +180,9 @@ def load_persona():
 # ============================================================
 # Claudeでツイート生成
 # ============================================================
-def generate_news_tweet(title: str, url: str, source: str) -> str:
+def generate_news_tweet(title: str, url: str, source: str, description: str = '') -> str:
     persona = load_persona()
+    desc_block = f'概要: {description}' if description else '概要: （取得なし。タイトルの情報のみで判断する）'
 
     prompt = f"""以下のペルソナ定義に従って、このAIニュースに対するペスカとしてのXへの投稿を1つ書いてください。
 
@@ -186,6 +192,7 @@ def generate_news_tweet(title: str, url: str, source: str) -> str:
 === AIニュース ===
 ソース: {source}
 タイトル: {title}
+{desc_block}
 URL: {url}
 
 === 生成ルール ===
@@ -211,6 +218,10 @@ URL: {url}
 
 **お決まり構成NG**
 ❌「〜らしい。〜が気になる。個人開発で試してみる」→ この3段構成を毎回繰り返さない
+
+**記憶頼みのバージョン比較NG（最重要）**
+❌「Claude 3シリーズが出てからそんなに経ってない気がするけど」「前のバージョンからまだ間もないのに」
+→ 過去のバージョン名・リリース時期・世代を自分の記憶や推測で持ち出さない（事実と食い違って支離滅裂になるリスクが高い）。新機能や差分について語ってよいのは、上の「概要」に書かれている内容が根拠にできる場合のみ。それ以外は今回のニュース単体への観察で完結させる
 
 === 良い例（参考）===
 ✅「KPMGが27万人規模でClaude導入。コンサル業界、会社の判断待たずに現場が勝手に使い始めるパターンの方が早そう」
@@ -352,7 +363,7 @@ def main():
 
             # ツイート生成（失敗時はseen登録せず次回再試行）
             try:
-                tweet = generate_news_tweet(item['title'], item['url'], item['source'])
+                tweet = generate_news_tweet(item['title'], item['url'], item['source'], item.get('description', ''))
             except Exception as e:
                 print(f'  ⚠️ ツイート生成エラー（スキップ・次回再試行）: {e}')
                 continue
