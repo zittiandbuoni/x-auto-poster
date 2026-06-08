@@ -8,3 +8,5 @@ reports/
 tweet_cron.log
 reply_log.csv
 reply_state.json
+ai_news_seen.json
+ai_news.log
